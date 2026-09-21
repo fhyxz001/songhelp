@@ -3,7 +3,7 @@ import '../models/lyric_line.dart';
 import '../services/japanese_annotator.dart';
 
 /// 逐行歌词视图，支持：
-/// - 滚动到当前播放行并高亮
+/// - 滚动并让当前播放行始终居中高亮
 /// - 日语汉字注音（上方显示平假名）+ 释义（下方小字）
 /// - 点击任意歌词行 => 重唱该句（回调 [onTapLine]）
 class LyricListView extends StatefulWidget {
@@ -32,7 +32,11 @@ class LyricListView extends StatefulWidget {
 }
 
 class _LyricListViewState extends State<LyricListView> {
-  final ScrollController _controller = ScrollController();
+  final ScrollController _scrollController = ScrollController();
+
+  /// 每一行歌词对应的 key，用于精确测量其渲染位置以实现居中。
+  final Map<int, GlobalKey> _rowKeys = {};
+
   int _lastActiveIndex = -1;
 
   /// 找到当前播放位置对应的歌词行索引（最后一个 startMs <= positionMs 的行）。
@@ -49,33 +53,60 @@ class _LyricListViewState extends State<LyricListView> {
     return idx;
   }
 
-  void _scrollToActive() {
+  GlobalKey _keyFor(int index) {
+    return _rowKeys.putIfAbsent(index, () => GlobalKey());
+  }
+
+  /// 把活动行滚动到视口垂直居中。
+  void _centerActiveRow() {
     final idx = _activeIndex();
     if (idx < 0 || idx == _lastActiveIndex) return;
     _lastActiveIndex = idx;
 
-    // 滚动到指定行的大致位置（每行高度估算 + 居中偏移）
-    const rowHeight = 56.0;
-    const viewportCenter = 240.0; // 视口大约一半
-    final target = idx * rowHeight - viewportCenter;
-    if (_controller.hasClients) {
-      _controller.animateTo(
-        target.clamp(0, _controller.position.maxScrollExtent).toDouble(),
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeOut,
-      );
-    }
+    if (!_scrollController.hasClients) return;
+
+    // 找到活动行在列表视口坐标系里的位置
+    final RenderBox? rowBox =
+        _keyFor(idx).currentContext?.findRenderObject() as RenderBox?;
+    if (rowBox == null || !rowBox.attached) return;
+
+    // 列表视口本身的 RenderBox（ListView 对应的是 scrollable 的 viewport）
+    final RenderBox? viewportBox =
+        _scrollController.position.context.storageContext
+            ?.findRenderObject() as RenderBox?;
+    if (viewportBox == null) return;
+
+    // 行顶边相对于视口顶边的偏移
+    final rowTopInViewport =
+        rowBox.localToGlobal(Offset.zero, ancestor: viewportBox).dy;
+    final rowHeight = rowBox.size.height;
+    final viewportHeight = _scrollController.position.viewportDimension;
+
+    // 让该行中心对齐到视口中心所需的偏移量（正值表示需要向下滚动）
+    final delta =
+        rowTopInViewport - (viewportHeight / 2 - rowHeight / 2);
+
+    final target =
+        (_scrollController.offset + delta).clamp(0.0, _scrollController.position.maxScrollExtent);
+
+    _scrollController.animateTo(
+      target.toDouble(),
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOut,
+    );
   }
 
   @override
   void didUpdateWidget(LyricListView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _scrollToActive();
+    if (oldWidget.positionMs != widget.positionMs) {
+      _centerActiveRow();
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -88,17 +119,20 @@ class _LyricListViewState extends State<LyricListView> {
     final activeIndex = _activeIndex();
 
     return ListView.builder(
-      controller: _controller,
+      controller: _scrollController,
       padding: const EdgeInsets.symmetric(vertical: 220),
       itemCount: widget.lines.length,
       itemBuilder: (context, index) {
         final line = widget.lines[index];
         final isActive = index == activeIndex;
-        return _LyricRow(
-          line: line,
-          isActive: isActive,
-          showRuby: widget.showRuby,
-          onTap: () => widget.onTapLine(line.startMs),
+        return Container(
+          key: _keyFor(index),
+          child: _LyricRow(
+            line: line,
+            isActive: isActive,
+            showRuby: widget.showRuby,
+            onTap: () => widget.onTapLine(line.startMs),
+          ),
         );
       },
     );
@@ -129,10 +163,7 @@ class _LyricRow extends StatelessWidget {
 
     Widget content;
     if (showRuby && line.isJapanese) {
-      content = _RubyText(
-        line: line,
-        isActive: isActive,
-      );
+      content = _RubyText(line: line, isActive: isActive);
     } else {
       content = Text(
         line.text,
@@ -178,16 +209,19 @@ class _RubyText extends StatelessWidget {
     return Wrap(
       crossAxisAlignment: WrapCrossAlignment.end,
       children: annotations.map((a) {
-        final footnoteColor =
-            a.isKanji ? (isActive ? activeColor : inactiveColor.withOpacity(0.75)) : Colors.transparent;
+        // 注音颜色：仅当该单元是汉字时才显示注音（假名不重复注音）
+        final showFurigana = a.isKanji && a.reading != a.surface && a.reading != '';
+        final footnoteColor = showFurigana
+            ? (isActive ? activeColor : inactiveColor.withOpacity(0.75))
+            : Colors.transparent;
 
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 0.5),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 注音（平假名）显示在汉字上方，假名本身不重复显示
-              if (a.isKanji)
+              // 注音（平假名）显示在汉字上方；无正确读音则不显示
+              if (showFurigana)
                 Text(
                   a.reading,
                   style: TextStyle(
@@ -207,7 +241,7 @@ class _RubyText extends StatelessWidget {
                 ),
               ),
               // 释义
-              if (a.isKanji && a.meaning != null)
+              if (showFurigana && a.meaning != null)
                 Text(
                   a.meaning!,
                   style: TextStyle(

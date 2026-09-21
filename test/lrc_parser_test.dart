@@ -52,5 +52,19 @@ void main() {
       final ann = JapaneseAnnotator.instance.annotate('海');
       expect(ann.any((a) => a.surface == '海'), true);
     });
+
+    test('查不到读音的汉字注音为空（不误报为汉字本身）', () {
+      // '竈'（かまど）不在词典中，注音应为空字符串，而不是汉字本身
+      final ann = JapaneseAnnotator.instance.annotate('竈');
+      final kanji = ann.firstWhere((a) => a.surface == '竈');
+      expect(kanji.reading, '');
+    });
+
+    test('假名注音原样保留', () {
+      final ann = JapaneseAnnotator.instance.annotate('あ');
+      final kana = ann.firstWhere((a) => a.surface == 'あ');
+      expect(kana.reading, 'あ');
+      expect(kana.isKanji, false);
+    });
   });
 }
