@@ -34,8 +34,11 @@ class LyricListView extends StatefulWidget {
 class _LyricListViewState extends State<LyricListView> {
   final ScrollController _scrollController = ScrollController();
 
-  /// 每一行歌词对应的 key，用于精确测量其渲染位置以实现居中。
+  /// 活动行 division 的 key，用于精确测量其渲染位置以实现居中。
   final Map<int, GlobalKey> _rowKeys = {};
+
+  /// ListView 本身的 context，用于计算行相对视口的位置。
+  BuildContext? _listContext;
 
   int _lastActiveIndex = -1;
 
@@ -53,41 +56,41 @@ class _LyricListViewState extends State<LyricListView> {
     return idx;
   }
 
-  GlobalKey _keyFor(int index) {
-    return _rowKeys.putIfAbsent(index, () => GlobalKey());
+  GlobalKey _keyFor(int index) => _rowKeys.putIfAbsent(index, GlobalKey.new);
+
+  /// 把活动行滚动到视口垂直居中。放在布局完成后调用以确保测量准确。
+  void _scheduleCenter() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _centerActiveRow();
+    });
   }
 
-  /// 把活动行滚动到视口垂直居中。
   void _centerActiveRow() {
     final idx = _activeIndex();
     if (idx < 0 || idx == _lastActiveIndex) return;
     _lastActiveIndex = idx;
 
-    if (!_scrollController.hasClients) return;
+    if (!_scrollController.hasClients || _listContext == null) return;
 
-    // 找到活动行在列表视口坐标系里的位置
-    final RenderBox? rowBox =
+    final listRenderBox = _listContext!.findRenderObject() as RenderBox?;
+    final rowRenderBox =
         _keyFor(idx).currentContext?.findRenderObject() as RenderBox?;
-    if (rowBox == null || !rowBox.attached) return;
+    if (listRenderBox == null || rowRenderBox == null || !rowRenderBox.attached) {
+      return;
+    }
 
-    // 列表视口本身的 RenderBox（ListView 对应的是 scrollable 的 viewport）
-    final RenderBox? viewportBox =
-        _scrollController.position.context.storageContext
-            ?.findRenderObject() as RenderBox?;
-    if (viewportBox == null) return;
-
-    // 行顶边相对于视口顶边的偏移
-    final rowTopInViewport =
-        rowBox.localToGlobal(Offset.zero, ancestor: viewportBox).dy;
-    final rowHeight = rowBox.size.height;
+    // 行顶边相对 ListView 视口顶边的偏移
+    final rowTop =
+        rowRenderBox.localToGlobal(Offset.zero, ancestor: listRenderBox).dy;
+    final rowHeight = rowRenderBox.size.height;
     final viewportHeight = _scrollController.position.viewportDimension;
 
-    // 让该行中心对齐到视口中心所需的偏移量（正值表示需要向下滚动）
-    final delta =
-        rowTopInViewport - (viewportHeight / 2 - rowHeight / 2);
+    // 让该行中心对齐到视口中心需要额外滚动的距离
+    final delta = rowTop - (viewportHeight / 2 - rowHeight / 2);
 
-    final target =
-        (_scrollController.offset + delta).clamp(0.0, _scrollController.position.maxScrollExtent);
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    final target = (_scrollController.offset + delta).clamp(0.0, maxExtent);
 
     _scrollController.animateTo(
       target.toDouble(),
@@ -100,7 +103,7 @@ class _LyricListViewState extends State<LyricListView> {
   void didUpdateWidget(LyricListView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.positionMs != widget.positionMs) {
-      _centerActiveRow();
+      _scheduleCenter();
     }
   }
 
@@ -118,24 +121,27 @@ class _LyricListViewState extends State<LyricListView> {
 
     final activeIndex = _activeIndex();
 
-    return ListView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.symmetric(vertical: 220),
-      itemCount: widget.lines.length,
-      itemBuilder: (context, index) {
-        final line = widget.lines[index];
-        final isActive = index == activeIndex;
-        return Container(
-          key: _keyFor(index),
-          child: _LyricRow(
-            line: line,
-            isActive: isActive,
-            showRuby: widget.showRuby,
-            onTap: () => widget.onTapLine(line.startMs),
-          ),
-        );
-      },
-    );
+    return Builder(builder: (listContext) {
+      _listContext = listContext;
+      return ListView.builder(
+        controller: _scrollController,
+        padding: const EdgeInsets.symmetric(vertical: 220),
+        itemCount: widget.lines.length,
+        itemBuilder: (context, index) {
+          final line = widget.lines[index];
+          final isActive = index == activeIndex;
+          return Container(
+            key: _keyFor(index),
+            child: _LyricRow(
+              line: line,
+              isActive: isActive,
+              showRuby: widget.showRuby,
+              onTap: () => widget.onTapLine(line.startMs),
+            ),
+          );
+        },
+      );
+    });
   }
 }
 
@@ -209,8 +215,8 @@ class _RubyText extends StatelessWidget {
     return Wrap(
       crossAxisAlignment: WrapCrossAlignment.end,
       children: annotations.map((a) {
-        // 注音颜色：仅当该单元是汉字时才显示注音（假名不重复注音）
-        final showFurigana = a.isKanji && a.reading != a.surface && a.reading != '';
+        // 仅当该单元是汉字且存在正确读音时才显示注音
+        final showFurigana = a.isKanji && a.reading.isNotEmpty && a.reading != a.surface;
         final footnoteColor = showFurigana
             ? (isActive ? activeColor : inactiveColor.withOpacity(0.75))
             : Colors.transparent;
@@ -220,7 +226,6 @@ class _RubyText extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 注音（平假名）显示在汉字上方；无正确读音则不显示
               if (showFurigana)
                 Text(
                   a.reading,
@@ -230,7 +235,6 @@ class _RubyText extends StatelessWidget {
                     height: 1.1,
                   ),
                 ),
-              // 原文
               Text(
                 a.surface,
                 style: TextStyle(
@@ -240,7 +244,6 @@ class _RubyText extends StatelessWidget {
                   height: 1.2,
                 ),
               ),
-              // 释义
               if (showFurigana && a.meaning != null)
                 Text(
                   a.meaning!,
