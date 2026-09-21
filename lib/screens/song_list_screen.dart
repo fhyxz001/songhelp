@@ -123,10 +123,10 @@ class _SongListScreenState extends State<SongListScreen> {
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.music_note, size: 64, color: Colors.grey),
-            const SizedBox(height: 16),
-            const Text(
+          children: const [
+            Icon(Icons.music_note, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
+            Text(
               '目录中还没有歌曲。\n请把歌曲(.mp3/.flac等)和同名歌词(.lrc)放入：\n内部存储/Music/SongHelp/',
               textAlign: TextAlign.center,
               style: TextStyle(height: 1.6),
