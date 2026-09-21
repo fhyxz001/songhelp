@@ -1,0 +1,31 @@
+name: songhelp
+description: 日语练唱辅助 App —— 播放本地歌曲、显示 LRC 歌词、日语汉字注音与释义、点击歌词重唱。
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 音频播放
+  just_audio: ^0.9.39
+  # 存储权限
+  permission_handler: ^11.3.1
+
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  # 内置离线字典与注音库（当前为代码内建，预留资源扩展位）
+  # assets:
+  #   - assets/dict/
+  #   - assets/lyrics/
