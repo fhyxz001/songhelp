@@ -118,12 +118,12 @@ class _SongListScreenState extends State<SongListScreen> {
   }
 
   Widget _buildEmpty() {
-    return Center(
+    return const Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             Icon(Icons.music_note, size: 64, color: Colors.grey),
             SizedBox(height: 16),
             Text(
