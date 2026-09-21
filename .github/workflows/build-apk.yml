@@ -39,13 +39,13 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos
 
-      - name: Build release APK
-        run: flutter build apk --release --split-per-abi
+      - name: Build release APK (armeabi-v7a 32位)
+        run: flutter build apk --release --target-platform android-arm
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: songhelp-apk
           path: |
-            build/app/outputs/flutter-apk/*.apk
+            build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
